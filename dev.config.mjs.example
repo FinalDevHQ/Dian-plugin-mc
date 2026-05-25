@@ -9,7 +9,7 @@
 export default {
   wsUrl: "ws://127.0.0.1:3901",
   token: "your-token-here",    // 在 Dian Web UI → dian-dev-sync 插件 → 配置里查看
-  pluginName: "hello-world",   // 必须与 @Plugin({ name: "..." }) 一致
+  pluginName: "dian-plugin-mc",   // 必须与 @Plugin({ name: "..." }) 一致
   distDir: "dist",
   debounceMs: 300,
 };
