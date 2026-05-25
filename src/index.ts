@@ -18,7 +18,7 @@ import {
   handleDelete,
   getQueryHistory,
 } from "./commands.js";
-import { isPuppeteerAvailable, renderStatusImage } from "./render.js";
+import { isPuppeteerAvailable, renderStatusImage, generatePreviewHtml } from "./render.js";
 
 @Plugin({
   name: "dian-plugin-mc",
@@ -95,7 +95,7 @@ export default class McPlugin {
               if (puppeteerAvailable) {
                 await c.reply(`正在查询 ${targetAddress}...`);
                 const status = await pingJava(targetAddress, { timeout: this.config.timeout });
-                const image = await renderStatusImage(status, this.config.puppeteerUrl);
+                const image = await renderStatusImage(status, this.config.puppeteerUrl, this.config.customTemplates?.status);
                 if (image) {
                   const groupId = c.event.payload.groupId;
                   if (groupId) {
@@ -236,6 +236,17 @@ export default class McPlugin {
     ctx.route("GET", "/puppeteer", async (_req, reply) => {
       const available = await isPuppeteerAvailable(this.config.puppeteerUrl);
       reply.send({ ok: true, available });
+    });
+
+    // POST /plugins/dian-plugin-mc/api/preview-html
+    ctx.route("POST", "/preview-html", (req, reply) => {
+      const { type, html } = req.body as { type?: string; html?: string };
+      if (!type || !html || !['status', 'help', 'list'].includes(type)) {
+        reply.status(400).send({ ok: false, error: "需要 type (status/help/list) 和 html 参数" });
+        return;
+      }
+      const preview = generatePreviewHtml(type as 'status' | 'help' | 'list', html);
+      reply.type("text/html").send(preview);
     });
 
     // ── Web UI ─────────────────────────────────────────────────────

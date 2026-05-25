@@ -70,7 +70,7 @@ function addQueryRecord(address: string, status: ServerStatus): void {
  */
 export async function handleHelp(ctx: EventContext, config: PluginConfig): Promise<void> {
   if (config.imageMode && await isPuppeteerAvailable(config.puppeteerUrl)) {
-    const image = await renderHelpImage(config.puppeteerUrl);
+    const image = await renderHelpImage(config.puppeteerUrl, config.customTemplates?.help);
     if (image) {
       await sendImage(ctx, image);
       return;
@@ -174,7 +174,7 @@ export async function handleList(ctx: EventContext, config: PluginConfig): Promi
   }
 
   if (config.imageMode && await isPuppeteerAvailable(config.puppeteerUrl)) {
-    const image = await renderListImage(config.servers, config.puppeteerUrl);
+    const image = await renderListImage(config.servers, config.puppeteerUrl, config.customTemplates?.list);
     if (image) {
       await sendImage(ctx, image);
       return;

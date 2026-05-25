@@ -119,6 +119,73 @@ ui/
     Config.tsx     # 配置编辑
 ```
 
+## 自定义模板
+
+在 Web UI → 自定义模板 中，可以为三种图片模式编写自定义 HTML 模板。留空则使用内置模板。
+
+### 模板变量
+
+**服务器状态模板** (`mc 状态`)：
+
+| 变量 | 说明 |
+|------|------|
+| `{{address}}` | 查询地址 |
+| `{{host}}` | 主机名 |
+| `{{port}}` | 端口 |
+| `{{online}}` | 是否在线 (`true`/`false`) |
+| `{{onlineText}}` | `在线`/`离线` |
+| `{{onlineEmoji}}` | `🟢`/`🔴` |
+| `{{statusClass}}` | CSS 类名 (`status-online`/`status-offline`) |
+| `{{playersOnline}}` | 在线人数 |
+| `{{playersMax}}` | 最大人数 |
+| `{{latency}}` | 延迟 (ms) |
+| `{{version}}` | 版本名 |
+| `{{protocol}}` | 协议号 |
+| `{{motd}}` | MOTD 纯文本 |
+| `{{motdHtml}}` | MOTD HTML（带颜色） |
+| `{{favicon}}` | Favicon base64 |
+| `{{faviconHtml}}` | Favicon `<img>` 标签 |
+| `{{players}}` | 玩家 JSON 数组 |
+| `{{playersList}}` | 玩家名列表文本 |
+| `{{mods}}` | Mod JSON 数组 |
+| `{{modsCount}}` | Mod 数量 |
+| `{{error}}` | 错误信息（离线时） |
+| `{{time}}` | 查询时间 |
+
+**帮助模板** (`mc 帮助`)：`{{time}}`
+
+**列表模板** (`mc 列表`)：
+
+| 变量 | 说明 |
+|------|------|
+| `{{count}}` | 服务器数量 |
+| `{{servers}}` | 服务器行 HTML |
+| `{{serversJson}}` | 服务器 JSON 数组 |
+| `{{time}}` | 当前时间 |
+
+### 模板示例
+
+```html
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+<style>
+  body { font-family: sans-serif; background: #1a1a2e; color: #fff; padding: 20px; }
+  .card { background: #0f0f23; border-radius: 12px; padding: 20px; max-width: 400px; }
+  .online { color: #4ade80; } .offline { color: #ef4444; }
+</style></head>
+<body>
+<div class="card">
+  <h2>{{onlineEmoji}} {{address}}</h2>
+  <p class="{{statusClass}}">{{onlineText}} — {{playersOnline}}/{{playersMax}} 玩家</p>
+  <p>版本: {{version}} | 延迟: {{latency}}ms</p>
+  <p>{{motdHtml}}</p>
+  <small>{{time}}</small>
+</div>
+</body>
+</html>
+```
+
 ## 依赖
 
 - **Dian-plugin-puppeteer**（可选）：图片渲染功能需要安装并启用 Puppeteer 插件

@@ -113,6 +113,12 @@ export interface PluginConfig {
   imageMode: boolean;
   /** Puppeteer 插件地址 */
   puppeteerUrl: string;
+  /** 自定义 HTML 模板（留空使用内置模板） */
+  customTemplates: {
+    status?: string;
+    help?: string;
+    list?: string;
+  };
 }
 
 /** 默认配置 */
@@ -126,6 +132,7 @@ export const DEFAULT_CONFIG: PluginConfig = {
   debug: false,
   imageMode: false,
   puppeteerUrl: "http://127.0.0.1:3000",
+  customTemplates: {},
 };
 
 /** MOTD 颜色代码映射 */
