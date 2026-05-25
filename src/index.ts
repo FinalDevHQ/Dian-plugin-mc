@@ -1,7 +1,6 @@
 import "reflect-metadata";
 import {
   Plugin,
-  Handler,
   Interceptor,
   type EventContext,
   type PluginSetupContext,
@@ -10,16 +9,14 @@ import {
 import { PKG_VERSION } from "./version.js";
 import { loadConfig, saveConfig } from "./config.js";
 import type { PluginConfig } from "./types.js";
-import { pingJava, formatStatusText } from "./mcping.js";
+import { pingJava } from "./mcping.js";
 import {
   handleHelp,
-  handlePing,
   handleStatus,
   handleList,
   handleAdd,
   handleDelete,
   getQueryHistory,
-  clearCache,
 } from "./commands.js";
 import { isPuppeteerAvailable, renderStatusImage } from "./render.js";
 
@@ -51,150 +48,111 @@ export default class McPlugin {
     }
   }
 
-  // ── 帮助指令 ───────────────────────────────────────────────────────────
-  @Handler(/^mc\s*(?:帮助|help|命令)$/i)
-  async onHelp(ctx: EventContext): Promise<void> {
-    await handleHelp(ctx, this.config);
-  }
-
-  // ── 查询指令（简略） ──────────────────────────────────────────────────
-  @Handler(/^mc\s+(?:ping|查|查询)\s+(.+)$/i)
-  async onPing(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
-    const address = match[1]?.trim();
-    await handlePing(ctx, this.config, address);
-  }
-
-  // ── 详细查询指令 ─────────────────────────────────────────────────────
-  @Handler(/^mc\s+(?:状态|status|info)\s+(.+)$/i)
-  async onStatus(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
-    const address = match[1]?.trim();
-
-    // 检查是否是已保存的服务器名称
-    let targetAddress = address;
-    const saved = this.config.servers.find(
-      s => s.name === address || s.address === address
-    );
-    if (saved) {
-      targetAddress = saved.address;
-    }
-
-    // 尝试图片渲染
-    const puppeteerAvailable = await isPuppeteerAvailable();
-    if (puppeteerAvailable) {
-      await ctx.reply(`正在查询 ${targetAddress}...`);
-      const status = await pingJava(targetAddress, { timeout: this.config.timeout });
-
-      const image = await renderStatusImage(status);
-      if (image) {
-        // 发送图片
-        await ctx.reply({ type: 'image', file: `base64://${image}` });
-        return;
-      }
-    }
-
-    // 降级为文本
-    await handleStatus(ctx, this.config, address);
-  }
-
-  // ── 列表指令 ─────────────────────────────────────────────────────────
-  @Handler(/^mc\s+(?:列表|list|ls)$/i)
-  async onList(ctx: EventContext): Promise<void> {
-    await handleList(ctx, this.config);
-  }
-
-  // ── 添加指令 ─────────────────────────────────────────────────────────
-  @Handler(/^mc\s+(?:添加|add|订阅)\s+(\S+)\s+(\S+)$/i)
-  async onAdd(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
-    const name = match[1]?.trim();
-    const address = match[2]?.trim();
-    await handleAdd(ctx, this.config, name, address);
-  }
-
-  // ── 删除指令 ─────────────────────────────────────────────────────────
-  @Handler(/^mc\s+(?:删除|del|remove|取消)\s+(.+)$/i)
-  async onDelete(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
-    const nameOrAddress = match[1]?.trim();
-    await handleDelete(ctx, this.config, nameOrAddress);
-  }
-
-  // ── 快捷查询（直接输入地址） ─────────────────────────────────────────
-  @Handler(/^(?:mc|MC)\s+(\S+\.\S+(?::\d+)?)$/i)
-  async onQuickPing(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
-    const address = match[1]?.trim();
-    if (address && !['ping', '状态', '列表', '添加', '删除', '帮助'].includes(address)) {
-      await handlePing(ctx, this.config, address);
-    }
-  }
-
   // ── 插件初始化 ───────────────────────────────────────────────────────
   onSetup(ctx: PluginSetupContext): void {
     // ── 注册指令元数据 ─────────────────────────────────────────────────
     ctx.command({
-      name: "mc-ping",
+      name: "mc",
       segment: "mc",
-      aliases: ["mc", "mc ping", "mc 状态"],
-      pattern: () => /mc\s+(?:ping|状态|查询)\s+(\S+)/i,
-      description: "查询 MC 服务器状态",
-      usage: "mc ping <地址[:端口]>",
-      examples: ["mc ping mc.hypixel.net", "mc 状态 hypixel"],
+      aliases: ["mc", "mc-ping", "minecraft"],
+      description: "MC 服务器状态查询插件",
       category: "工具",
-      handler: async (c: EventContext) => {
-        const text = c.event.payload.text || "";
-        const match = text.match(/mc\s+(?:ping|状态|查询)\s+(\S+)/i);
-        if (match) {
-          await handlePing(c, this.config, match[1]);
-        }
-      },
-    });
-
-    ctx.command({
-      name: "mc-list",
-      segment: "mc-list",
-      aliases: ["mc 列表"],
-      pattern: () => /mc\s+(?:列表|list)/i,
-      description: "查看已保存的服务器列表",
-      usage: "mc 列表",
-      examples: ["mc 列表"],
-      category: "工具",
-      handler: async (c: EventContext) => {
-        await handleList(c, this.config);
-      },
-    });
-
-    ctx.command({
-      name: "mc-add",
-      segment: "mc-add",
-      aliases: ["mc 添加"],
-      pattern: () => /mc\s+(?:添加|add)\s+(\S+)\s+(\S+)/i,
-      description: "添加服务器到列表",
-      usage: "mc 添加 <名称> <地址>",
-      examples: ["mc 添加 海岛 mc.hypixel.net"],
-      category: "工具",
-      handler: async (c: EventContext) => {
-        const text = c.event.payload.text || "";
-        const match = text.match(/mc\s+(?:添加|add)\s+(\S+)\s+(\S+)/i);
-        if (match) {
-          await handleAdd(c, this.config, match[1], match[2]);
-        }
-      },
-    });
-
-    ctx.command({
-      name: "mc-delete",
-      segment: "mc-delete",
-      aliases: ["mc 删除"],
-      pattern: () => /mc\s+(?:删除|del|remove)\s+(\S+)/i,
-      description: "从列表删除服务器",
-      usage: "mc 删除 <名称或地址>",
-      examples: ["mc 删除 海岛"],
-      category: "工具",
-      handler: async (c: EventContext) => {
-        const text = c.event.payload.text || "";
-        const match = text.match(/mc\s+(?:删除|del|remove)\s+(\S+)/i);
-        if (match) {
-          await handleDelete(c, this.config, match[1]);
-        }
-      },
+      order: 30,
+      children: [
+        {
+          name: "帮助",
+          segment: "帮助",
+          aliases: ["help", "命令"],
+          pattern: /mc\s*(?:帮助|help|命令)$/i,
+          description: "查看 MC 插件指令",
+          usage: "mc 帮助",
+          examples: ["mc 帮助"],
+          order: 10,
+          handler: async (c: EventContext) => {
+            await handleHelp(c, this.config);
+          },
+        },
+        {
+          name: "查询",
+          segment: "查询",
+          aliases: ["ping", "状态", "status", "info"],
+          pattern: /mc\s+(?:ping|查|查询|状态|status|info)\s+(\S+)/i,
+          description: "查询 MC 服务器状态",
+          usage: "mc 查询 <地址[:端口]>",
+          examples: ["mc 查询 mc.hypixel.net", "mc 状态 hypixel"],
+          order: 20,
+          handler: async (c: EventContext) => {
+            const text = c.event.payload.text || "";
+            const match = text.match(/mc\s+(?:ping|查|查询|状态|status|info)\s+(\S+)/i);
+            if (match) {
+              const address = match[1]?.trim();
+              let targetAddress = address;
+              const saved = this.config.servers.find(
+                s => s.name === address || s.address === address
+              );
+              if (saved) targetAddress = saved.address;
+              const puppeteerAvailable = await isPuppeteerAvailable();
+              if (puppeteerAvailable) {
+                await c.reply(`正在查询 ${targetAddress}...`);
+                const status = await pingJava(targetAddress, { timeout: this.config.timeout });
+                const image = await renderStatusImage(status);
+                if (image) {
+                  await c.reply({ type: 'image', file: `base64://${image}` });
+                  return;
+                }
+              }
+              await handleStatus(c, this.config, address);
+            }
+          },
+        },
+        {
+          name: "列表",
+          segment: "列表",
+          aliases: ["list", "ls"],
+          pattern: /mc\s+(?:列表|list|ls)$/i,
+          description: "查看已保存的服务器列表",
+          usage: "mc 列表",
+          examples: ["mc 列表"],
+          order: 30,
+          handler: async (c: EventContext) => {
+            await handleList(c, this.config);
+          },
+        },
+        {
+          name: "添加",
+          segment: "添加",
+          aliases: ["add", "订阅"],
+          pattern: /mc\s+(?:添加|add|订阅)\s+(\S+)\s+(\S+)/i,
+          description: "添加服务器到列表",
+          usage: "mc 添加 <名称> <地址>",
+          examples: ["mc 添加 海岛 mc.hypixel.net"],
+          order: 40,
+          handler: async (c: EventContext) => {
+            const text = c.event.payload.text || "";
+            const match = text.match(/mc\s+(?:添加|add|订阅)\s+(\S+)\s+(\S+)/i);
+            if (match) {
+              await handleAdd(c, this.config, match[1], match[2]);
+            }
+          },
+        },
+        {
+          name: "删除",
+          segment: "删除",
+          aliases: ["del", "remove", "取消"],
+          pattern: /mc\s+(?:删除|del|remove|取消)\s+(\S+)/i,
+          description: "从列表删除服务器",
+          usage: "mc 删除 <名称或地址>",
+          examples: ["mc 删除 海岛"],
+          order: 50,
+          handler: async (c: EventContext) => {
+            const text = c.event.payload.text || "";
+            const match = text.match(/mc\s+(?:删除|del|remove|取消)\s+(\S+)/i);
+            if (match) {
+              await handleDelete(c, this.config, match[1]);
+            }
+          },
+        },
+      ],
     });
 
     // ── HTTP API 路由 ─────────────────────────────────────────────────
