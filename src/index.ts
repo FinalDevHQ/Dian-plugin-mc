@@ -91,13 +91,24 @@ export default class McPlugin {
                 s => s.name === address || s.address === address
               );
               if (saved) targetAddress = saved.address;
-              const puppeteerAvailable = await isPuppeteerAvailable();
+              const puppeteerAvailable = await isPuppeteerAvailable(this.config.puppeteerUrl);
               if (puppeteerAvailable) {
                 await c.reply(`正在查询 ${targetAddress}...`);
                 const status = await pingJava(targetAddress, { timeout: this.config.timeout });
-                const image = await renderStatusImage(status);
+                const image = await renderStatusImage(status, this.config.puppeteerUrl);
                 if (image) {
-                  await c.reply({ type: 'image', file: `base64://${image}` });
+                  const groupId = c.event.payload.groupId;
+                  if (groupId) {
+                    await c.sendAction("send_group_msg", {
+                      group_id: String(groupId),
+                      message: [{ type: "image", data: { file: `base64://${image}` } }],
+                    });
+                  } else {
+                    await c.sendAction("send_private_msg", {
+                      user_id: String(c.event.payload.userId),
+                      message: [{ type: "image", data: { file: `base64://${image}` } }],
+                    });
+                  }
                   return;
                 }
               }
@@ -223,7 +234,7 @@ export default class McPlugin {
 
     // GET /plugins/dian-plugin-mc/api/puppeteer
     ctx.route("GET", "/puppeteer", async (_req, reply) => {
-      const available = await isPuppeteerAvailable();
+      const available = await isPuppeteerAvailable(this.config.puppeteerUrl);
       reply.send({ ok: true, available });
     });
 

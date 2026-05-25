@@ -109,6 +109,10 @@ export interface PluginConfig {
   owners: string[];
   /** 调试模式 */
   debug: boolean;
+  /** 是否以图片模式发送（需要 Puppeteer 插件） */
+  imageMode: boolean;
+  /** Puppeteer 插件地址 */
+  puppeteerUrl: string;
 }
 
 /** 默认配置 */
@@ -120,6 +124,8 @@ export const DEFAULT_CONFIG: PluginConfig = {
   cacheTTL: 30,
   owners: [],
   debug: false,
+  imageMode: false,
+  puppeteerUrl: "http://127.0.0.1:3000",
 };
 
 /** MOTD 颜色代码映射 */

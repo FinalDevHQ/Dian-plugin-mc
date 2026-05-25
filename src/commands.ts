@@ -6,6 +6,25 @@ import type { EventContext } from "@myfinal/plugin-runtime";
 import type { PluginConfig, ServerStatus, QueryRecord } from "./types.js";
 import { pingJava, formatStatusText } from "./mcping.js";
 import { loadConfig, saveConfig, addServer, removeServer, findServer } from "./config.js";
+import { renderHelpImage, renderListImage, isPuppeteerAvailable } from "./render.js";
+
+/**
+ * 发送图片消息
+ */
+async function sendImage(ctx: EventContext, base64: string): Promise<void> {
+  const groupId = ctx.event.payload.groupId;
+  if (groupId) {
+    await ctx.sendAction("send_group_msg", {
+      group_id: String(groupId),
+      message: [{ type: "image", data: { file: `base64://${base64}` } }],
+    });
+  } else {
+    await ctx.sendAction("send_private_msg", {
+      user_id: String(ctx.event.payload.userId),
+      message: [{ type: "image", data: { file: `base64://${base64}` } }],
+    });
+  }
+}
 
 /** 查询历史记录（最多保留 50 条） */
 const queryHistory: QueryRecord[] = [];
@@ -50,12 +69,20 @@ function addQueryRecord(address: string, status: ServerStatus): void {
  * 帮助指令
  */
 export async function handleHelp(ctx: EventContext, config: PluginConfig): Promise<void> {
+  if (config.imageMode && await isPuppeteerAvailable(config.puppeteerUrl)) {
+    const image = await renderHelpImage(config.puppeteerUrl);
+    if (image) {
+      await sendImage(ctx, image);
+      return;
+    }
+  }
+
   const help = [
     '🎮 MC 服务器查询插件',
     '',
     '指令列表:',
-    '  mc ping <地址[:端口]>    查询服务器状态（简略）',
-    '  mc 状态 <地址[:端口]>    查询服务器状态（详细）',
+    '  mc 查询 <地址[:端口]>    查询服务器状态（简略）',
+    '  mc 状态 <地址[:端口]>    查询服务器状态（详细+图片）',
     '  mc 列表                  查看已保存的服务器列表',
     '  mc 添加 <名称> <地址>    添加服务器到列表',
     '  mc 删除 <名称或地址>     从列表删除服务器',
@@ -66,7 +93,7 @@ export async function handleHelp(ctx: EventContext, config: PluginConfig): Promi
     '  play.example.com:25566   指定端口',
     '',
     '示例:',
-    '  mc ping mc.hypixel.net',
+    '  mc 查询 mc.hypixel.net',
     '  mc 状态 hypixel',
   ].join('\n');
 
@@ -144,6 +171,14 @@ export async function handleList(ctx: EventContext, config: PluginConfig): Promi
   if (config.servers.length === 0) {
     await ctx.reply('📋 服务器列表为空\n使用 mc 添加 <名称> <地址> 添加服务器');
     return;
+  }
+
+  if (config.imageMode && await isPuppeteerAvailable(config.puppeteerUrl)) {
+    const image = await renderListImage(config.servers, config.puppeteerUrl);
+    if (image) {
+      await sendImage(ctx, image);
+      return;
+    }
   }
 
   const lines = ['📋 已保存的服务器:', ''];

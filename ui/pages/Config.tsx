@@ -10,6 +10,8 @@ interface PluginConfig {
   cacheTTL: number
   owners: string[]
   debug: boolean
+  imageMode: boolean
+  puppeteerUrl: string
 }
 
 export default function ConfigPage({ showToast }: { showToast: (msg: string, ok?: boolean) => void }) {
@@ -137,6 +139,42 @@ export default function ConfigPage({ showToast }: { showToast: (msg: string, ok?
             <div>
               <p className="text-sm font-medium text-slate-900">启用调试日志</p>
               <p className="text-xs text-slate-400">输出详细的查询日志到控制台</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 图片渲染 */}
+      <Card>
+        <CardHeader>
+          <Label>图片渲染</Label>
+          <p className="text-xs text-slate-400">通过 Puppeteer 将指令输出渲染为图片</p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cfg.imageMode}
+                  onChange={(e) => setCfg({ ...cfg, imageMode: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-slate-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+              <div>
+                <p className="text-sm font-medium text-slate-900">图片模式</p>
+                <p className="text-xs text-slate-400">帮助、列表等指令以图片形式发送（需要 Puppeteer 插件）</p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium text-slate-500">Puppeteer 地址</label>
+              <Input
+                placeholder="http://127.0.0.1:3000"
+                value={cfg.puppeteerUrl || "http://127.0.0.1:3000"}
+                onChange={(e) => setCfg({ ...cfg, puppeteerUrl: e.target.value || "http://127.0.0.1:3000" })}
+              />
+              <p className="text-[11px] text-slate-400">Dian 服务地址，用于调用 Puppeteer 渲染 API</p>
             </div>
           </div>
         </CardContent>
