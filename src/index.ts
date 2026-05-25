@@ -17,6 +17,7 @@ import {
   handleAdd,
   handleDelete,
   getQueryHistory,
+  addQueryRecord,
 } from "./commands.js";
 import { isPuppeteerAvailable, renderStatusImage, generatePreviewHtml } from "./render.js";
 
@@ -95,6 +96,7 @@ export default class McPlugin {
               if (puppeteerAvailable) {
                 await c.reply(`正在查询 ${targetAddress}...`);
                 const status = await pingJava(targetAddress, { timeout: this.config.timeout });
+                addQueryRecord(targetAddress, status);
                 const image = await renderStatusImage(status, this.config.puppeteerUrl, this.config.customTemplates?.status);
                 if (image) {
                   const groupId = c.event.payload.groupId;

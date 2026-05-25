@@ -58,7 +58,7 @@ function setCachedResult(address: string, status: ServerStatus): void {
 /**
  * 添加查询记录
  */
-function addQueryRecord(address: string, status: ServerStatus): void {
+export function addQueryRecord(address: string, status: ServerStatus): void {
   queryHistory.unshift({ address, status, timestamp: new Date().toISOString() });
   if (queryHistory.length > 50) {
     queryHistory.pop();
