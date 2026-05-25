@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version from package.json
+        id: pkg
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag exists
+        id: check
+        run: |
+          if git rev-parse "${{ steps.pkg.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if tag already exists
+        if: steps.check.outputs.exists == 'true'
+        run: echo "Tag ${{ steps.pkg.outputs.version }} already exists, skipping release."
+
+      - name: Setup Node.js
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install & Build
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          npm ci
+          npm run pack
+
+      - name: Resolve zip filename
+        if: steps.check.outputs.exists == 'false'
+        id: meta
+        run: |
+          NAME=$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).name")
+          echo "zip=${NAME}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.pkg.outputs.version }}"
+          git push origin "${{ steps.pkg.outputs.version }}"
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.pkg.outputs.version }}
+          files: ${{ steps.meta.outputs.zip }}
+          generate_release_notes: true
