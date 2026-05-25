@@ -1,7 +1,7 @@
 {
-  "name": "hello-world",
+  "name": "dian-plugin-mc",
   "version": "1.0.0",
-  "description": "Dian 插件模板 — Hello World",
+  "description": "用于查询MC服务器状态的插件",
   "type": "module",
   "scripts": {
     "build": "tsup && vite build --config ui/vite.config.ts",

@@ -1,149 +1,225 @@
 import { useState, useEffect, useCallback } from "react"
-import { Card, CardHeader, CardContent, Label, Badge, StatCard, RegSection, MethodBadge } from "../components"
-import { API, PLUGINS_API, apiFetch } from "../api"
+import { Card, CardHeader, CardContent, Label, Input, Button, Badge, StatCard } from "../components"
+import { API, apiFetch } from "../api"
 
-const PLUGIN_NAME = "hello-world"
+interface ServerStatus {
+  online: boolean
+  address: string
+  host: string
+  port: number
+  latency: number
+  version: { name: string; protocol: number }
+  players: { online: number; max: number }
+  description: string
+  descriptionHtml: string
+  favicon?: string
+  queriedAt: string
+  error?: string
+}
 
-interface PluginMetaInfo {
+interface ServerEntry {
   name: string
-  handlers: { method: string; pattern: string }[]
-  commands: { name: string; pattern: string; description?: string }[]
-  routes: { method: string; path: string }[]
+  address: string
+  type: 'java' | 'bedrock'
+  enabled: boolean
+  createdAt: string
 }
 
-interface Status {
-  startTime: number
-  pingCount: number
-  config: { command: string; reply: string }
-}
-
-function fmtUptime(ms: number): string {
-  const s = Math.floor(ms / 1000)
-  const h = String(Math.floor(s / 3600)).padStart(2, "0")
-  const m = String(Math.floor((s % 3600) / 60)).padStart(2, "0")
-  const sec = String(s % 60).padStart(2, "0")
-  return `${h}:${m}:${sec}`
+interface PluginConfig {
+  servers: ServerEntry[]
+  defaultPort: number
+  timeout: number
+  cacheTTL: number
 }
 
 export default function Dashboard() {
-  const [status, setStatus] = useState<Status | null>(null)
-  const [meta, setMeta] = useState<PluginMetaInfo | null>(null)
+  const [config, setConfig] = useState<PluginConfig | null>(null)
+  const [queryAddress, setQueryAddress] = useState("")
+  const [querying, setQuerying] = useState(false)
+  const [queryResult, setQueryResult] = useState<ServerStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [uptime, setUptime] = useState("—")
 
-  const load = useCallback(async () => {
+  const loadConfig = useCallback(async () => {
     try {
-      const [data, metaList] = await Promise.all([
-        apiFetch(`${API}/status`).then((r) => r.json()) as Promise<Status>,
-        apiFetch(PLUGINS_API).then((r) => r.json()).then(
-          (j: { plugins: PluginMetaInfo[] }) => j.plugins
-        ).catch(() => [] as PluginMetaInfo[]),
-      ])
-      setStatus(data)
-      setMeta(metaList.find((p) => p.name === PLUGIN_NAME) ?? null)
-      setError(null)
-    } catch {
-      setError("无法连接到插件 API")
-    }
+      const r = await apiFetch(`${API}/config`).then(r => r.json())
+      if (r.ok) setConfig(r.config)
+    } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { loadConfig() }, [loadConfig])
 
-  useEffect(() => {
-    if (!status?.startTime) return
-    const start = status.startTime
-    setUptime(fmtUptime(Date.now() - start))
-    const t = setInterval(() => setUptime(fmtUptime(Date.now() - start)), 1000)
-    return () => clearInterval(t)
-  }, [status?.startTime])
+  const handleQuery = async () => {
+    if (!queryAddress.trim()) return
+    setQuerying(true)
+    setError(null)
+    setQueryResult(null)
+
+    try {
+      const r = await apiFetch(`${API}/ping?address=${encodeURIComponent(queryAddress)}`).then(r => r.json())
+      if (r.ok) {
+        setQueryResult(r.status)
+      } else {
+        setError(r.error || "查询失败")
+      }
+    } catch {
+      setError("无法连接到插件 API")
+    } finally {
+      setQuerying(false)
+    }
+  }
+
+  const onlineServers = config?.servers.filter(s => s.enabled).length ?? 0
 
   return (
     <div className="flex flex-col gap-6">
       {/* 页头 */}
       <div className="flex items-center gap-4">
-        <div className="flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 text-white text-2xl shadow-md">
-          👋
+        <div className="flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-emerald-800 text-white text-2xl shadow-md">
+          🎮
         </div>
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold text-slate-900">Hello World</h1>
-            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${
-              error ? "bg-red-50 text-red-600 ring-red-500/20" : "bg-emerald-50 text-emerald-600 ring-emerald-500/20"
-            }`}>
-              {error ? "连接失败" : status ? "运行中" : "加载中"}
-            </span>
-          </div>
-          <p className="text-sm text-slate-400 mt-0.5">
-            {error || (status ? `指令 ${status.config.command} → ${status.config.reply}` : "—")}
-          </p>
+          <h1 className="text-xl font-bold text-slate-900">MC 服务器查询</h1>
+          <p className="text-sm text-slate-400 mt-0.5">查询 Minecraft 服务器状态</p>
         </div>
       </div>
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
-          label="运行时长"
-          value={uptime}
-          icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 15,15"/></svg>}
+          label="已保存服务器"
+          value={config?.servers.length ?? "—"}
+          icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>}
         />
         <StatCard
-          label="触发次数"
-          value={status?.pingCount ?? "—"}
-          icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>}
-        />
-        <StatCard
-          label="触发指令"
-          value={status?.config.command ?? "—"}
+          label="默认端口"
+          value={config?.defaultPort ?? "—"}
           mono
-          icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><polyline points="4,17 10,11 4,5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>}
+          icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}
+        />
+        <StatCard
+          label="查询超时"
+          value={`${config?.timeout ?? "—"}ms`}
+          mono
+          icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 15,15"/></svg>}
         />
       </div>
 
-      {/* 已注册信息 */}
+      {/* 快速查询 */}
       <Card>
         <CardHeader>
-          <Label>已注册</Label>
-          <p className="text-xs text-slate-400">从宿主 /plugins 接口实时获取</p>
+          <Label>快速查询</Label>
+          <p className="text-xs text-slate-400">输入服务器地址查询状态</p>
         </CardHeader>
         <CardContent>
-          {!meta ? (
-            <p className="py-4 text-center text-sm text-slate-400">暂无数据</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <RegSection title="指令" count={meta.commands.length} empty="未注册指令">
-                {meta.commands.map((c, i) => (
-                  <div key={i} className="flex flex-col gap-0.5 rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <Badge className="border-sky-600/40 bg-sky-50 text-sky-700">{c.name}</Badge>
-                      <code className="font-mono text-[11px] text-slate-400 truncate">{c.pattern}</code>
+          <div className="flex gap-3">
+            <Input
+              placeholder="mc.hypixel.net 或 play.example.com:25566"
+              value={queryAddress}
+              onChange={(e) => setQueryAddress(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleQuery()}
+              className="flex-1"
+            />
+            <Button onClick={handleQuery} disabled={querying || !queryAddress.trim()}>
+              {querying ? "查询中..." : "查询"}
+            </Button>
+          </div>
+
+          {/* 查询结果 */}
+          {queryResult && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4">
+              <div className="flex items-start gap-4">
+                {queryResult.favicon ? (
+                  <img src={queryResult.favicon} className="w-16 h-16 rounded-lg" alt="Server Icon" />
+                ) : (
+                  <div className="w-16 h-16 rounded-lg bg-slate-200 flex items-center justify-center text-2xl">
+                    🎮
+                  </div>
+                )}
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                      queryResult.online
+                        ? "bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-500/20"
+                        : "bg-red-50 text-red-600 ring-1 ring-inset ring-red-500/20"
+                    }`}>
+                      {queryResult.online ? "🟢 在线" : "🔴 离线"}
+                    </span>
+                    <span className="text-sm font-mono text-slate-500">{queryResult.address}</span>
+                  </div>
+
+                  {queryResult.online ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-xs text-slate-400">在线玩家</p>
+                        <p className="text-lg font-bold text-slate-900">{queryResult.players.online.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400">最大人数</p>
+                        <p className="text-lg font-bold text-slate-900">{queryResult.players.max.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400">延迟</p>
+                        <p className="text-lg font-bold text-slate-900">{queryResult.latency}ms</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-400">版本</p>
+                        <p className="text-sm font-medium text-slate-900">{queryResult.version.name}</p>
+                      </div>
                     </div>
-                    {c.description && <p className="text-[11px] text-slate-400 truncate">{c.description}</p>}
-                  </div>
-                ))}
-              </RegSection>
-              <RegSection title="API 路由" count={meta.routes.length} empty="未注册路由">
-                {meta.routes.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2">
-                    <MethodBadge method={r.method} />
-                    <code className="font-mono text-[11px] truncate">
-                      <span className="text-slate-400">/plugins/{PLUGIN_NAME}/api</span>
-                      <span>{r.path}</span>
-                    </code>
-                  </div>
-                ))}
-              </RegSection>
-              <RegSection title="事件处理器" count={meta.handlers.length} empty="未注册 @Handler">
-                {meta.handlers.map((h, i) => (
-                  <div key={i} className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/50 px-3 py-2">
-                    <Badge className="border-violet-600/40 bg-violet-50 text-violet-700 font-mono">{h.method}</Badge>
-                    <code className="font-mono text-[11px] text-slate-400 truncate">{h.pattern}</code>
-                  </div>
-                ))}
-              </RegSection>
+                  ) : (
+                    <p className="text-sm text-red-500">{queryResult.error || "无法连接到服务器"}</p>
+                  )}
+
+                  {queryResult.description && (
+                    <div className="mt-3 text-sm text-slate-600" dangerouslySetInnerHTML={{ __html: queryResult.descriptionHtml }} />
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">
+              {error}
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* 最近查询的服务器 */}
+      {config && config.servers.length > 0 && (
+        <Card>
+          <CardHeader>
+            <Label>已保存的服务器</Label>
+            <p className="text-xs text-slate-400">点击快速查询</p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {config.servers.slice(0, 6).map((server, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setQueryAddress(server.address)
+                    handleQuery()
+                  }}
+                  className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-emerald-300 hover:bg-emerald-50/50 transition-colors"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-lg">
+                    🎮
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-900 truncate">{server.name}</p>
+                    <p className="text-xs text-slate-400 font-mono truncate">{server.address}</p>
+                  </div>
+                  <Badge className={server.type === 'java' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-purple-200 bg-purple-50 text-purple-700'}>
+                    {server.type}
+                  </Badge>
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

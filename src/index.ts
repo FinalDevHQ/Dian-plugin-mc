@@ -8,149 +8,270 @@ import {
 } from "@myfinal/plugin-runtime";
 
 import { PKG_VERSION } from "./version.js";
-import { type Config, loadConfig, saveConfig } from "./config.js";
+import { loadConfig, saveConfig } from "./config.js";
+import type { PluginConfig } from "./types.js";
+import { pingJava, formatStatusText } from "./mcping.js";
+import {
+  handleHelp,
+  handlePing,
+  handleStatus,
+  handleList,
+  handleAdd,
+  handleDelete,
+  getQueryHistory,
+  clearCache,
+} from "./commands.js";
+import { isPuppeteerAvailable, renderStatusImage } from "./render.js";
 
 @Plugin({
-  name: "hello-world",
-  description: "Dian 插件模板 — Hello World",
+  name: "dian-plugin-mc",
+  description: "MC 服务器状态查询插件",
   version: PKG_VERSION,
-  author: "your-name",
-  icon: "👋",
+  author: "Dian",
+  icon: "🎮",
 })
-export default class PingPongPlugin {
-  /** 插件加载时间（服务端时间戳，毫秒） */
+export default class McPlugin {
+  /** 插件加载时间 */
   private readonly startTime = Date.now();
 
-  /** 运行时配置（可通过 Web UI 修改 reply，修改 command 需重启） */
-  private config = loadConfig();
+  /** 运行时配置 */
+  private config: PluginConfig;
 
-  /** 收到指令的累计次数 */
-  private pingCount = 0;
-
-  /** 最近触发记录（最多保留 50 条） */
-  private recentPings: Array<{
-    sender: string;
-    userId?: string;
-    group?: string;
-    platform?: string;
-    time: number;
-  }> = [];
-
-  // ── 事件处理器示例（@Handler，静态 pattern 匹配消息文本） ────────────────
-  // @Handler 接收 string（精确匹配）、RegExp 或返回它们的函数（动态 pattern）。
-  // 与 ctx.command() 的区别：pattern 在类加载时即确定，不支持运行时热更新；
-  // 若需要"改配置立即生效"的动态指令，请用 onSetup 里的 ctx.command()。
-  @Handler(/^#?help$/i)
-  async onHelp(ctx: EventContext): Promise<void> {
-    const uptime = Math.floor((Date.now() - this.startTime) / 1000);
-    await ctx.reply(
-      `📖 Hello World 插件\n` +
-      `触发词：${this.config.command}  →  ${this.config.reply}\n` +
-      `已运行：${uptime} 秒 | 累计触发：${this.pingCount} 次`
-    );
+  constructor() {
+    this.config = loadConfig();
   }
 
-  // ── 拦截器示例（最先执行，可用于日志、鉴权、过滤） ─────────────────────
+  // ── 拦截器（日志） ─────────────────────────────────────────────────────
   @Interceptor(10)
   async logInterceptor(ctx: EventContext): Promise<void> {
-    if (ctx.event.type === "message") {
+    if (this.config.debug && ctx.event.type === "message") {
       console.log(
-        `[hello-world] <${ctx.event.platform}> ${ctx.event.payload.senderName ?? "?"}: ${ctx.event.payload.text ?? ""}`
+        `[mc-plugin] <${ctx.event.platform}> ${ctx.event.payload.senderName ?? "?"}: ${ctx.event.payload.text ?? ""}`
       );
     }
   }
 
+  // ── 帮助指令 ───────────────────────────────────────────────────────────
+  @Handler(/^mc\s*(?:帮助|help|命令)$/i)
+  async onHelp(ctx: EventContext): Promise<void> {
+    await handleHelp(ctx, this.config);
+  }
+
+  // ── 查询指令（简略） ──────────────────────────────────────────────────
+  @Handler(/^mc\s+(?:ping|查|查询)\s+(.+)$/i)
+  async onPing(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
+    const address = match[1]?.trim();
+    await handlePing(ctx, this.config, address);
+  }
+
+  // ── 详细查询指令 ─────────────────────────────────────────────────────
+  @Handler(/^mc\s+(?:状态|status|info)\s+(.+)$/i)
+  async onStatus(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
+    const address = match[1]?.trim();
+
+    // 检查是否是已保存的服务器名称
+    let targetAddress = address;
+    const saved = this.config.servers.find(
+      s => s.name === address || s.address === address
+    );
+    if (saved) {
+      targetAddress = saved.address;
+    }
+
+    // 尝试图片渲染
+    const puppeteerAvailable = await isPuppeteerAvailable();
+    if (puppeteerAvailable) {
+      await ctx.reply(`正在查询 ${targetAddress}...`);
+      const status = await pingJava(targetAddress, { timeout: this.config.timeout });
+
+      const image = await renderStatusImage(status);
+      if (image) {
+        // 发送图片
+        await ctx.reply({ type: 'image', file: `base64://${image}` });
+        return;
+      }
+    }
+
+    // 降级为文本
+    await handleStatus(ctx, this.config, address);
+  }
+
+  // ── 列表指令 ─────────────────────────────────────────────────────────
+  @Handler(/^mc\s+(?:列表|list|ls)$/i)
+  async onList(ctx: EventContext): Promise<void> {
+    await handleList(ctx, this.config);
+  }
+
+  // ── 添加指令 ─────────────────────────────────────────────────────────
+  @Handler(/^mc\s+(?:添加|add|订阅)\s+(\S+)\s+(\S+)$/i)
+  async onAdd(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
+    const name = match[1]?.trim();
+    const address = match[2]?.trim();
+    await handleAdd(ctx, this.config, name, address);
+  }
+
+  // ── 删除指令 ─────────────────────────────────────────────────────────
+  @Handler(/^mc\s+(?:删除|del|remove|取消)\s+(.+)$/i)
+  async onDelete(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
+    const nameOrAddress = match[1]?.trim();
+    await handleDelete(ctx, this.config, nameOrAddress);
+  }
+
+  // ── 快捷查询（直接输入地址） ─────────────────────────────────────────
+  @Handler(/^(?:mc|MC)\s+(\S+\.\S+(?::\d+)?)$/i)
+  async onQuickPing(ctx: EventContext, match: RegExpMatchArray): Promise<void> {
+    const address = match[1]?.trim();
+    if (address && !['ping', '状态', '列表', '添加', '删除', '帮助'].includes(address)) {
+      await handlePing(ctx, this.config, address);
+    }
+  }
+
+  // ── 插件初始化 ───────────────────────────────────────────────────────
   onSetup(ctx: PluginSetupContext): void {
-    // ── 注册指令（Command Registry 元数据供 dian-help 查看）────────────────
+    // ── 注册指令元数据 ─────────────────────────────────────────────────
     ctx.command({
-      name: "hello",
-      segment: "hello",
-      aliases: [this.config.command, "hello", "hi"],
-      pattern: () => this.config.command,
-      description: `回复 "${this.config.reply}"`,
-      usage: `${this.config.command}`,
-      examples: [this.config.command],
-      category: "趣味",
+      name: "mc-ping",
+      segment: "mc",
+      aliases: ["mc", "mc ping", "mc 状态"],
+      pattern: () => /mc\s+(?:ping|状态|查询)\s+(\S+)/i,
+      description: "查询 MC 服务器状态",
+      usage: "mc ping <地址[:端口]>",
+      examples: ["mc ping mc.hypixel.net", "mc 状态 hypixel"],
+      category: "工具",
       handler: async (c: EventContext) => {
-        this.pingCount++;
-        this.recentPings.unshift({
-          sender: c.event.payload.senderName ?? "unknown",
-          userId: c.event.payload.userId,
-          group: c.event.payload.groupId,
-          platform: c.event.platform,
-          time: c.event.timestamp,
-        });
-        if (this.recentPings.length > 50) this.recentPings.pop();
-
-        console.log(
-          `[hello-world] ${c.event.payload.senderName ?? "?"} ` +
-          `→ "${this.config.reply}"`
-        );
-        await c.reply(this.config.reply);
-      },
-    });
-
-    // ── sendAction 示例：调用底层 Bot API ───────────────────────────────────
-    // sendAction 用于调用底层平台 API（如 OneBot 的 send_group_msg、set_group_ban 等）。
-    // 这里注册一个 !mute 指令作为示例（需要 Bot 有管理员权限）。
-    ctx.command({
-      name: "mute",
-      segment: "mute",
-      aliases: [this.config.muteCommand, "禁言"],
-      pattern: () => this.config.muteCommand,
-      description: `禁言发送者 ${this.config.muteDuration} 秒（示例，需 Bot 有管理员权限）`,
-      usage: `${this.config.muteCommand}`,
-      examples: [this.config.muteCommand],
-      category: "管理",
-      handler: async (c: EventContext) => {
-        if (!c.event.payload.groupId) {
-          await c.reply("此指令只能在群聊中使用");
-          return;
-        }
-        // 调用 OneBot API 执行禁言
-        const result = await c.sendAction("set_group_ban", {
-          group_id: Number(c.event.payload.groupId),
-          user_id: Number(c.event.payload.userId),
-          duration: this.config.muteDuration,
-        });
-        if (result.ok) {
-          await c.reply(`已禁言 ${this.config.muteDuration} 秒`);
-        } else {
-          await c.reply(`操作失败: ${result.message ?? "未知错误"}`);
+        const text = c.event.payload.text || "";
+        const match = text.match(/mc\s+(?:ping|状态|查询)\s+(\S+)/i);
+        if (match) {
+          await handlePing(c, this.config, match[1]);
         }
       },
     });
 
-    // ── GET /plugins/hello-world/api/status ────────────────────────────────────
-    ctx.route("GET", "/status", (_req, reply) => {
-      reply.send({
-        startTime: this.startTime,
-        pingCount: this.pingCount,
-        config: this.config,
-        recentPings: this.recentPings.slice(0, 10),
-      });
+    ctx.command({
+      name: "mc-list",
+      segment: "mc-list",
+      aliases: ["mc 列表"],
+      pattern: () => /mc\s+(?:列表|list)/i,
+      description: "查看已保存的服务器列表",
+      usage: "mc 列表",
+      examples: ["mc 列表"],
+      category: "工具",
+      handler: async (c: EventContext) => {
+        await handleList(c, this.config);
+      },
     });
 
-    // ── POST /plugins/hello-world/api/config ───────────────────────────────────
-    ctx.route("POST", "/config", (req, reply) => {
-      const body = req.body as Partial<Config>;
-      if (typeof body.reply === "string" && body.reply.trim()) {
-        this.config.reply = body.reply.trim();
-      }
-      if (typeof body.command === "string" && body.command.trim()) {
-        this.config.command = body.command.trim();
-      }
-      if (typeof body.muteCommand === "string" && body.muteCommand.trim()) {
-        this.config.muteCommand = body.muteCommand.trim();
-      }
-      if (typeof body.muteDuration === "number" && body.muteDuration > 0) {
-        this.config.muteDuration = Math.floor(body.muteDuration);
-      }
-      saveConfig(this.config);
+    ctx.command({
+      name: "mc-add",
+      segment: "mc-add",
+      aliases: ["mc 添加"],
+      pattern: () => /mc\s+(?:添加|add)\s+(\S+)\s+(\S+)/i,
+      description: "添加服务器到列表",
+      usage: "mc 添加 <名称> <地址>",
+      examples: ["mc 添加 海岛 mc.hypixel.net"],
+      category: "工具",
+      handler: async (c: EventContext) => {
+        const text = c.event.payload.text || "";
+        const match = text.match(/mc\s+(?:添加|add)\s+(\S+)\s+(\S+)/i);
+        if (match) {
+          await handleAdd(c, this.config, match[1], match[2]);
+        }
+      },
+    });
+
+    ctx.command({
+      name: "mc-delete",
+      segment: "mc-delete",
+      aliases: ["mc 删除"],
+      pattern: () => /mc\s+(?:删除|del|remove)\s+(\S+)/i,
+      description: "从列表删除服务器",
+      usage: "mc 删除 <名称或地址>",
+      examples: ["mc 删除 海岛"],
+      category: "工具",
+      handler: async (c: EventContext) => {
+        const text = c.event.payload.text || "";
+        const match = text.match(/mc\s+(?:删除|del|remove)\s+(\S+)/i);
+        if (match) {
+          await handleDelete(c, this.config, match[1]);
+        }
+      },
+    });
+
+    // ── HTTP API 路由 ─────────────────────────────────────────────────
+
+    // GET /plugins/dian-plugin-mc/api/config
+    ctx.route("GET", "/config", (_req, reply) => {
       reply.send({ ok: true, config: this.config });
     });
 
-    // ── Web UI ───────────────────────────────────────────────────────────────
+    // POST /plugins/dian-plugin-mc/api/config
+    ctx.route("POST", "/config", (req, reply) => {
+      const body = req.body as Partial<PluginConfig>;
+      if (body) {
+        this.config = { ...this.config, ...body };
+        saveConfig(this.config);
+      }
+      reply.send({ ok: true, config: this.config });
+    });
+
+    // GET /plugins/dian-plugin-mc/api/ping?address=xxx
+    ctx.route("GET", "/ping", async (req, reply) => {
+      const address = (req.query as any)?.address;
+      if (!address) {
+        reply.status(400).send({ ok: false, error: "请提供 address 参数" });
+        return;
+      }
+
+      const status = await pingJava(address, { timeout: this.config.timeout });
+      reply.send({ ok: true, status });
+    });
+
+    // GET /plugins/dian-plugin-mc/api/servers
+    ctx.route("GET", "/servers", (_req, reply) => {
+      reply.send({ ok: true, servers: this.config.servers });
+    });
+
+    // POST /plugins/dian-plugin-mc/api/servers/add
+    ctx.route("POST", "/servers/add", (req, reply) => {
+      const { name, address, type = 'java' } = req.body as any;
+      if (!name || !address) {
+        reply.status(400).send({ ok: false, error: "请提供 name 和 address" });
+        return;
+      }
+
+      const { addServer } = require("./config.js");
+      const success = addServer(this.config, name, address, type);
+      reply.send({ ok: success, servers: this.config.servers });
+    });
+
+    // POST /plugins/dian-plugin-mc/api/servers/delete
+    ctx.route("POST", "/servers/delete", (req, reply) => {
+      const { nameOrAddress } = req.body as any;
+      if (!nameOrAddress) {
+        reply.status(400).send({ ok: false, error: "请提供 nameOrAddress" });
+        return;
+      }
+
+      const { removeServer } = require("./config.js");
+      const success = removeServer(this.config, nameOrAddress);
+      reply.send({ ok: success, servers: this.config.servers });
+    });
+
+    // GET /plugins/dian-plugin-mc/api/history
+    ctx.route("GET", "/history", (_req, reply) => {
+      const history = getQueryHistory();
+      reply.send({ ok: true, history });
+    });
+
+    // GET /plugins/dian-plugin-mc/api/puppeteer
+    ctx.route("GET", "/puppeteer", async (_req, reply) => {
+      const available = await isPuppeteerAvailable();
+      reply.send({ ok: true, available });
+    });
+
+    // ── Web UI ─────────────────────────────────────────────────────
     ctx.ui({ staticDir: "./public", entry: "index.html" });
+
+    console.log(`[mc-plugin] 插件已加载，版本 ${PKG_VERSION}`);
   }
 }

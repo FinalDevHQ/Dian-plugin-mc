@@ -1,4 +1,4 @@
-const PLUGIN_NAME = "hello-world"
+const PLUGIN_NAME = "dian-plugin-mc"
 export const API = `/plugins/${PLUGIN_NAME}/api`
 export const PLUGINS_API = "/plugins"
 
