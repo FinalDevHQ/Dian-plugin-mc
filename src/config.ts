@@ -84,6 +84,21 @@ export function removeServer(config: PluginConfig, nameOrAddress: string): boole
 }
 
 /**
+ * 编辑服务器
+ */
+export function editServer(config: PluginConfig, nameOrAddress: string, patch: { name?: string; address?: string }): boolean {
+  const server = config.servers.find(
+    s => s.name === nameOrAddress || s.address === nameOrAddress
+  );
+  if (!server) return false;
+
+  if (patch.name) server.name = patch.name;
+  if (patch.address) server.address = patch.address;
+  saveConfig(config);
+  return true;
+}
+
+/**
  * 查找服务器
  */
 export function findServer(config: PluginConfig, nameOrAddress: string) {

@@ -288,8 +288,10 @@ function generateBuiltinHelpHtml(): string {
   <div class="section"><div class="section-title">指令列表</div>
     <div class="cmd-row"><span class="cmd-name">mc 查询 &lt;地址&gt;</span><span class="cmd-desc">查询服务器状态</span></div>
     <div class="cmd-row"><span class="cmd-name">mc 状态 &lt;地址&gt;</span><span class="cmd-desc">详细查询+图片</span></div>
+    <div class="cmd-row"><span class="cmd-name">mc 全部</span><span class="cmd-desc">批量查询所有服务器</span></div>
     <div class="cmd-row"><span class="cmd-name">mc 列表</span><span class="cmd-desc">查看已保存的服务器</span></div>
     <div class="cmd-row"><span class="cmd-name">mc 添加 &lt;名&gt; &lt;地址&gt;</span><span class="cmd-desc">添加服务器</span></div>
+    <div class="cmd-row"><span class="cmd-name">mc 编辑 &lt;名称&gt;</span><span class="cmd-desc">修改服务器</span></div>
     <div class="cmd-row"><span class="cmd-name">mc 删除 &lt;名称&gt;</span><span class="cmd-desc">删除服务器</span></div>
     <div class="cmd-row"><span class="cmd-name">mc 帮助</span><span class="cmd-desc">显示帮助</span></div>
   </div>

@@ -27,6 +27,10 @@ export default function ServersPage({ showToast }: { showToast: (msg: string, ok
   const [adding, setAdding] = useState(false)
   const [testingAll, setTestingAll] = useState(false)
   const [serverStatuses, setServerStatuses] = useState<Map<string, ServerStatus>>(new Map())
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editName, setEditName] = useState("")
+  const [editAddress, setEditAddress] = useState("")
+  const [saving, setSaving] = useState(false)
 
   const loadServers = useCallback(async () => {
     try {
@@ -78,6 +82,47 @@ export default function ServersPage({ showToast }: { showToast: (msg: string, ok
       }
     } catch {
       showToast("删除失败", false)
+    }
+  }
+
+  const startEdit = (index: number) => {
+    setEditingIndex(index)
+    setEditName(servers[index].name)
+    setEditAddress(servers[index].address)
+  }
+
+  const cancelEdit = () => {
+    setEditingIndex(null)
+    setEditName("")
+    setEditAddress("")
+  }
+
+  const handleSave = async () => {
+    if (editingIndex === null || (!editName.trim() && !editAddress.trim())) return
+    setSaving(true)
+
+    try {
+      const original = servers[editingIndex]
+      const r = await apiFetch(`${API}/servers/update`, {
+        method: "POST",
+        body: JSON.stringify({
+          nameOrAddress: original.name,
+          name: editName.trim() || undefined,
+          address: editAddress.trim() || undefined,
+        }),
+      }).then(r => r.json())
+
+      if (r.ok) {
+        showToast("保存成功")
+        setServers(r.servers)
+        cancelEdit()
+      } else {
+        showToast(r.error || "保存失败", false)
+      }
+    } catch {
+      showToast("保存失败", false)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -151,60 +196,98 @@ export default function ServersPage({ showToast }: { showToast: (msg: string, ok
         <div className="grid gap-4">
           {servers.map((server, i) => {
             const status = serverStatuses.get(server.address)
+            const isEditing = editingIndex === i
             return (
               <Card key={i}>
                 <CardContent className="py-4">
-                  <div className="flex items-center gap-4">
-                    {/* 状态指示器 */}
-                    <div className={`w-3 h-3 rounded-full ${
-                      status?.online ? 'bg-emerald-500' : status ? 'bg-red-500' : 'bg-slate-300'
-                    }`} />
+                  {isEditing ? (
+                    /* 编辑模式 */
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <Input
+                          placeholder="名称"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="sm:w-48"
+                        />
+                        <Input
+                          placeholder="地址"
+                          value={editAddress}
+                          onChange={(e) => setEditAddress(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && handleSave()}
+                          className="flex-1"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 justify-end">
+                        <Button variant="ghost" onClick={cancelEdit} className="text-xs">
+                          取消
+                        </Button>
+                        <Button onClick={handleSave} disabled={saving} className="text-xs">
+                          {saving ? "保存中..." : "保存"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* 展示模式 */
+                    <div className="flex items-center gap-4">
+                      {/* 状态指示器 */}
+                      <div className={`w-3 h-3 rounded-full ${
+                        status?.online ? 'bg-emerald-500' : status ? 'bg-red-500' : 'bg-slate-300'
+                      }`} />
 
-                    {/* 服务器信息 */}
-                    <div className="flex-1 min-w-0">
+                      {/* 服务器信息 */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-slate-900">{server.name}</span>
+                          <Badge className={server.type === 'java' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-purple-200 bg-purple-50 text-purple-700'}>
+                            {server.type}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">{server.address}</p>
+                      </div>
+
+                      {/* 状态信息 */}
+                      {status && (
+                        <div className="hidden sm:flex items-center gap-4 text-sm">
+                          {status.online ? (
+                            <>
+                              <span className="text-emerald-600">🟢 在线</span>
+                              <span className="text-slate-500">{status.players.online}/{status.players.max}</span>
+                              <span className="text-slate-500">{status.latency}ms</span>
+                              <span className="text-slate-400">{status.version.name}</span>
+                            </>
+                          ) : (
+                            <span className="text-red-500">🔴 {status.error || "离线"}</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 操作按钮 */}
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-slate-900">{server.name}</span>
-                        <Badge className={server.type === 'java' ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-purple-200 bg-purple-50 text-purple-700'}>
-                          {server.type}
-                        </Badge>
+                        <Button
+                          variant="ghost"
+                          onClick={() => testServer(server.address)}
+                          className="text-xs"
+                        >
+                          测试
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => startEdit(i)}
+                          className="text-xs"
+                        >
+                          编辑
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => handleDelete(server.name)}
+                          className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
+                        >
+                          删除
+                        </Button>
                       </div>
-                      <p className="text-xs text-slate-400 font-mono mt-0.5">{server.address}</p>
                     </div>
-
-                    {/* 状态信息 */}
-                    {status && (
-                      <div className="hidden sm:flex items-center gap-4 text-sm">
-                        {status.online ? (
-                          <>
-                            <span className="text-emerald-600">🟢 在线</span>
-                            <span className="text-slate-500">{status.players.online}/{status.players.max}</span>
-                            <span className="text-slate-500">{status.latency}ms</span>
-                            <span className="text-slate-400">{status.version.name}</span>
-                          </>
-                        ) : (
-                          <span className="text-red-500">🔴 {status.error || "离线"}</span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* 操作按钮 */}
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        onClick={() => testServer(server.address)}
-                        className="text-xs"
-                      >
-                        测试
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleDelete(server.name)}
-                        className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
-                      >
-                        删除
-                      </Button>
-                    </div>
-                  </div>
+                  )}
                 </CardContent>
               </Card>
             )

@@ -7,7 +7,7 @@ import {
 } from "@myfinal/plugin-runtime";
 
 import { PKG_VERSION } from "./version.js";
-import { loadConfig, saveConfig } from "./config.js";
+import { loadConfig, saveConfig, editServer } from "./config.js";
 import type { PluginConfig } from "./types.js";
 import { pingJava } from "./mcping.js";
 import {
@@ -16,6 +16,8 @@ import {
   handleList,
   handleAdd,
   handleDelete,
+  handleEdit,
+  handleAll,
   getQueryHistory,
   addQueryRecord,
 } from "./commands.js";
@@ -165,6 +167,36 @@ export default class McPlugin {
             }
           },
         },
+        {
+          name: "编辑",
+          segment: "编辑",
+          aliases: ["edit", "修改"],
+          pattern: /mc\s+(?:编辑|edit|修改)\s+(\S+)(?:\s+(\S+))?(?:\s+(\S+))?/i,
+          description: "修改已保存的服务器",
+          usage: "mc 编辑 <名称> [新名称] [新地址]",
+          examples: ["mc 编辑 海岛 新名称 mc.new.net"],
+          order: 60,
+          handler: async (c: EventContext) => {
+            const text = c.event.payload.text || "";
+            const match = text.match(/mc\s+(?:编辑|edit|修改)\s+(\S+)(?:\s+(\S+))?(?:\s+(\S+))?/i);
+            if (match) {
+              await handleEdit(c, this.config, match[1], match[2], match[3]);
+            }
+          },
+        },
+        {
+          name: "全部",
+          segment: "全部",
+          aliases: ["all", "批量"],
+          pattern: /mc\s+(?:全部|all|批量)$/i,
+          description: "批量查询所有服务器状态",
+          usage: "mc 全部",
+          examples: ["mc 全部"],
+          order: 70,
+          handler: async (c: EventContext) => {
+            await handleAll(c, this.config);
+          },
+        },
       ],
     });
 
@@ -225,6 +257,22 @@ export default class McPlugin {
 
       const { removeServer } = require("./config.js");
       const success = removeServer(this.config, nameOrAddress);
+      reply.send({ ok: success, servers: this.config.servers });
+    });
+
+    // POST /plugins/dian-plugin-mc/api/servers/update
+    ctx.route("POST", "/servers/update", (req, reply) => {
+      const { nameOrAddress, name, address } = req.body as any;
+      if (!nameOrAddress) {
+        reply.status(400).send({ ok: false, error: "请提供 nameOrAddress" });
+        return;
+      }
+      if (!name && !address) {
+        reply.status(400).send({ ok: false, error: "请提供 name 或 address" });
+        return;
+      }
+
+      const success = editServer(this.config, nameOrAddress, { name, address });
       reply.send({ ok: success, servers: this.config.servers });
     });
 
