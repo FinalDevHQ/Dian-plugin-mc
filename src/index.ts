@@ -19,6 +19,7 @@ import {
   handleEdit,
   handleAll,
   getQueryHistory,
+  clearQueryHistory,
   addQueryRecord,
 } from "./commands.js";
 import { isPuppeteerAvailable, renderStatusImage, generatePreviewHtml } from "./render.js";
@@ -98,7 +99,7 @@ export default class McPlugin {
               if (puppeteerAvailable) {
                 await c.reply(`正在查询 ${targetAddress}...`);
                 const status = await pingJava(targetAddress, { timeout: this.config.timeout });
-                addQueryRecord(targetAddress, status);
+                await addQueryRecord(c.store, targetAddress, status);
                 const image = await renderStatusImage(status, this.config.puppeteerUrl, this.config.customTemplates?.status);
                 if (image) {
                   const groupId = c.event.payload.groupId;
@@ -277,9 +278,25 @@ export default class McPlugin {
     });
 
     // GET /plugins/dian-plugin-mc/api/history
-    ctx.route("GET", "/history", (_req, reply) => {
-      const history = getQueryHistory();
+    ctx.route("GET", "/history", async (req, reply) => {
+      const store = (req as unknown as Record<string, unknown>).pluginStore as import("@myfinal/plugin-runtime").PluginStore | undefined;
+      if (!store) {
+        reply.send({ ok: true, history: [] });
+        return;
+      }
+      const history = await getQueryHistory(store);
       reply.send({ ok: true, history });
+    });
+
+    // DELETE /plugins/dian-plugin-mc/api/history
+    ctx.route("DELETE", "/history", async (req, reply) => {
+      const store = (req as unknown as Record<string, unknown>).pluginStore as import("@myfinal/plugin-runtime").PluginStore | undefined;
+      if (!store) {
+        reply.send({ ok: false, error: "PluginStore 未启用" });
+        return;
+      }
+      await clearQueryHistory(store);
+      reply.send({ ok: true });
     });
 
     // GET /plugins/dian-plugin-mc/api/puppeteer

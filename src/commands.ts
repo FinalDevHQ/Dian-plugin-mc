@@ -2,7 +2,7 @@
  * MC 服务器查询插件 - 指令处理
  */
 
-import type { EventContext } from "@myfinal/plugin-runtime";
+import type { EventContext, PluginStore } from "@myfinal/plugin-runtime";
 import type { PluginConfig, ServerStatus, QueryRecord } from "./types.js";
 import { pingJava, formatStatusText } from "./mcping.js";
 import { loadConfig, saveConfig, addServer, removeServer, findServer, editServer } from "./config.js";
@@ -26,8 +26,19 @@ async function sendImage(ctx: EventContext, base64: string): Promise<void> {
   }
 }
 
-/** 查询历史记录（最多保留 50 条） */
-const queryHistory: QueryRecord[] = [];
+const HISTORY_TABLE = "mc_query_history";
+const MAX_HISTORY = 50;
+let historyTableReady = false;
+
+async function ensureHistoryTable(store: PluginStore): Promise<void> {
+  if (historyTableReady) return;
+  await store.createTable(HISTORY_TABLE, [
+    "address TEXT NOT NULL",
+    "status_json TEXT NOT NULL",
+    "timestamp TEXT NOT NULL",
+  ], "dian-plugin-mc");
+  historyTableReady = true;
+}
 
 /** 查询缓存 */
 const queryCache = new Map<string, { status: ServerStatus; timestamp: number }>();
@@ -58,11 +69,42 @@ function setCachedResult(address: string, status: ServerStatus): void {
 /**
  * 添加查询记录
  */
-export function addQueryRecord(address: string, status: ServerStatus): void {
-  queryHistory.unshift({ address, status, timestamp: new Date().toISOString() });
-  if (queryHistory.length > 50) {
-    queryHistory.pop();
+export async function addQueryRecord(store: PluginStore | undefined, address: string, status: ServerStatus): Promise<void> {
+  if (!store) return;
+  await ensureHistoryTable(store);
+  await store.insert(HISTORY_TABLE, {
+    address,
+    status_json: JSON.stringify(status),
+    timestamp: new Date().toISOString(),
+  });
+  const all = await store.query(HISTORY_TABLE, {}, { orderBy: "id", order: "DESC" });
+  if (all.length > MAX_HISTORY) {
+    const excess = all.slice(MAX_HISTORY);
+    for (const row of excess) {
+      await store.delete(HISTORY_TABLE, { id: row.id });
+    }
   }
+}
+
+/**
+ * 获取查询历史
+ */
+export async function getQueryHistory(store: PluginStore): Promise<QueryRecord[]> {
+  await ensureHistoryTable(store);
+  const rows = await store.query(HISTORY_TABLE, {}, { limit: MAX_HISTORY, orderBy: "id", order: "DESC" });
+  return rows.map((row): QueryRecord => ({
+    address: String(row.address ?? ""),
+    status: JSON.parse(String(row.status_json ?? "{}")) as ServerStatus,
+    timestamp: String(row.timestamp ?? ""),
+  }));
+}
+
+/**
+ * 清空查询历史
+ */
+export async function clearQueryHistory(store: PluginStore): Promise<void> {
+  await ensureHistoryTable(store);
+  await store.delete(HISTORY_TABLE, {});
 }
 
 /**
@@ -125,7 +167,7 @@ export async function handlePing(ctx: EventContext, config: PluginConfig, addres
     await ctx.reply(`正在查询 ${address}...`);
     status = await pingJava(address, { timeout: config.timeout });
     setCachedResult(address, status);
-    addQueryRecord(address, status);
+    await addQueryRecord(ctx.store, address, status);
   }
 
   // 格式化输出
@@ -159,7 +201,7 @@ export async function handleStatus(ctx: EventContext, config: PluginConfig, addr
     await ctx.reply(`正在查询 ${address}...`);
     status = await pingJava(address, { timeout: config.timeout });
     setCachedResult(address, status);
-    addQueryRecord(address, status);
+    await addQueryRecord(ctx.store, address, status);
   }
 
   // 格式化输出
@@ -301,13 +343,6 @@ function latencyIcon(ms: number): string {
   if (ms < 100) return '🟢';
   if (ms < 300) return '🟡';
   return '🟠';
-}
-
-/**
- * 获取查询历史
- */
-export function getQueryHistory(): QueryRecord[] {
-  return [...queryHistory];
 }
 
 /**

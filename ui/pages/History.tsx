@@ -43,8 +43,11 @@ export default function HistoryPage() {
     })
   }
 
-  const clearHistory = () => {
-    setHistory([])
+  const clearHistory = async () => {
+    try {
+      await apiFetch(`${API}/history`, { method: "DELETE" })
+      setHistory([])
+    } catch { /* ignore */ }
   }
 
   if (loading) {
