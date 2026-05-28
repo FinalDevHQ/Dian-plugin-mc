@@ -1,6 +1,6 @@
 {
   "name": "dian-plugin-mc",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "用于查询MC服务器状态的插件",
   "type": "module",
   "scripts": {
@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@myfinal/plugin-runtime": "^0.2.7",
-    "@myfinal/shared": "^0.2.4",
     "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {

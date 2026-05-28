@@ -95,8 +95,6 @@ export interface QueryRecord {
 
 /** 插件配置 */
 export interface PluginConfig {
-  /** 已保存的服务器列表 */
-  servers: ServerEntry[];
   /** 默认端口 */
   defaultPort: number;
   /** 查询超时（ms） */
@@ -123,7 +121,6 @@ export interface PluginConfig {
 
 /** 默认配置 */
 export const DEFAULT_CONFIG: PluginConfig = {
-  servers: [],
   defaultPort: 25565,
   timeout: 5000,
   maxRetries: 2,

@@ -3,7 +3,6 @@ import { Card, CardHeader, CardContent, Label, Input, Button } from "../componen
 import { API, apiFetch } from "../api"
 
 interface PluginConfig {
-  servers: any[]
   defaultPort: number
   timeout: number
   maxRetries: number

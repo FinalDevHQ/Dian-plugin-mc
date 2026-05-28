@@ -4,12 +4,14 @@ import ConfigPage from "./pages/Config"
 import ServersPage from "./pages/Servers"
 import HistoryPage from "./pages/History"
 import TemplatePage from "./pages/Template"
+import GuidePage from "./pages/Guide"
 
-type Page = "dashboard" | "servers" | "config" | "template" | "history"
+type Page = "dashboard" | "servers" | "guide" | "config" | "template" | "history"
 
 const NAV: { id: Page; label: string; icon: React.JSX.Element }[] = [
   { id: "dashboard", label: "仪表盘", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> },
   { id: "servers", label: "服务器列表", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg> },
+  { id: "guide", label: "指令指南", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/><path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg> },
   { id: "config", label: "插件配置", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg> },
   { id: "template", label: "自定义模板", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
   { id: "history", label: "查询历史", icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-4 h-4"><circle cx="12" cy="12" r="9"/><polyline points="12,7 12,12 15,15"/></svg> },
@@ -27,6 +29,7 @@ export default function App() {
   const pages: Record<Page, React.ReactNode> = {
     dashboard: <Dashboard />,
     servers: <ServersPage showToast={showToast} />,
+    guide: <GuidePage />,
     config: <ConfigPage showToast={showToast} />,
     template: <TemplatePage showToast={showToast} />,
     history: <HistoryPage />,

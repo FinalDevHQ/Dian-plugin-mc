@@ -1,16 +1,9 @@
-/**
- * MC 服务器查询插件 - 指令处理
- */
-
-import type { EventContext, PluginStore } from "@myfinal/plugin-runtime";
-import type { PluginConfig, ServerStatus, QueryRecord } from "./types.js";
+import type { EventContext } from "@myfinal/plugin-runtime";
+import type { PluginConfig, ServerStatus, ServerEntry } from "./types.js";
+import type { McStore } from "./store.js";
 import { pingJava, formatStatusText } from "./mcping.js";
-import { loadConfig, saveConfig, addServer, removeServer, findServer, editServer } from "./config.js";
 import { renderHelpImage, renderListImage, isPuppeteerAvailable } from "./render.js";
 
-/**
- * 发送图片消息
- */
 async function sendImage(ctx: EventContext, base64: string): Promise<void> {
   const groupId = ctx.event.payload.groupId;
   if (groupId) {
@@ -26,90 +19,40 @@ async function sendImage(ctx: EventContext, base64: string): Promise<void> {
   }
 }
 
-const HISTORY_TABLE = "mc_query_history";
-const MAX_HISTORY = 50;
-let historyTableReady = false;
-
-async function ensureHistoryTable(store: PluginStore): Promise<void> {
-  if (historyTableReady) return;
-  await store.createTable(HISTORY_TABLE, [
-    "address TEXT NOT NULL",
-    "status_json TEXT NOT NULL",
-    "timestamp TEXT NOT NULL",
-  ], "dian-plugin-mc");
-  historyTableReady = true;
-}
-
-/** 查询缓存 */
 const queryCache = new Map<string, { status: ServerStatus; timestamp: number }>();
 
-/**
- * 获取缓存的查询结果
- */
 function getCachedResult(address: string, cacheTTL: number): ServerStatus | null {
   const cached = queryCache.get(address);
   if (!cached) return null;
-
   const age = (Date.now() - cached.timestamp) / 1000;
   if (age > cacheTTL) {
     queryCache.delete(address);
     return null;
   }
-
   return cached.status;
 }
 
-/**
- * 设置查询缓存
- */
 function setCachedResult(address: string, status: ServerStatus): void {
   queryCache.set(address, { status, timestamp: Date.now() });
 }
 
-/**
- * 添加查询记录
- */
-export async function addQueryRecord(store: PluginStore | undefined, address: string, status: ServerStatus): Promise<void> {
-  if (!store) return;
-  await ensureHistoryTable(store);
-  await store.insert(HISTORY_TABLE, {
-    address,
-    status_json: JSON.stringify(status),
-    timestamp: new Date().toISOString(),
-  });
-  const all = await store.query(HISTORY_TABLE, {}, { orderBy: "id", order: "DESC" });
-  if (all.length > MAX_HISTORY) {
-    const excess = all.slice(MAX_HISTORY);
-    for (const row of excess) {
-      await store.delete(HISTORY_TABLE, { id: row.id });
-    }
-  }
+export async function addQueryRecord(store: McStore, address: string, status: ServerStatus): Promise<void> {
+  await store.addQueryRecord(address, JSON.stringify(status));
 }
 
-/**
- * 获取查询历史
- */
-export async function getQueryHistory(store: PluginStore): Promise<QueryRecord[]> {
-  await ensureHistoryTable(store);
-  const rows = await store.query(HISTORY_TABLE, {}, { limit: MAX_HISTORY, orderBy: "id", order: "DESC" });
-  return rows.map((row): QueryRecord => ({
-    address: String(row.address ?? ""),
-    status: JSON.parse(String(row.status_json ?? "{}")) as ServerStatus,
-    timestamp: String(row.timestamp ?? ""),
+export async function getQueryHistory(store: McStore) {
+  const rows = await store.getQueryHistory();
+  return rows.map(row => ({
+    address: row.address,
+    status: JSON.parse(row.statusJson) as ServerStatus,
+    timestamp: row.timestamp,
   }));
 }
 
-/**
- * 清空查询历史
- */
-export async function clearQueryHistory(store: PluginStore): Promise<void> {
-  await ensureHistoryTable(store);
-  await store.delete(HISTORY_TABLE, {});
+export async function clearQueryHistory(store: McStore): Promise<void> {
+  await store.clearQueryHistory();
 }
 
-/**
- * 帮助指令
- */
 export async function handleHelp(ctx: EventContext, config: PluginConfig): Promise<void> {
   if (config.imageMode && await isPuppeteerAvailable(config.puppeteerUrl)) {
     const image = await renderHelpImage(config.puppeteerUrl, config.customTemplates?.help);
@@ -145,32 +88,23 @@ export async function handleHelp(ctx: EventContext, config: PluginConfig): Promi
   await ctx.reply(help);
 }
 
-/**
- * 查询指令（简略）
- */
-export async function handlePing(ctx: EventContext, config: PluginConfig, address: string): Promise<void> {
+export async function handlePing(ctx: EventContext, config: PluginConfig, store: McStore, address: string): Promise<void> {
   if (!address) {
     await ctx.reply('请提供服务器地址\n用法: mc ping <地址[:端口]>');
     return;
   }
 
-  // 检查是否是已保存的服务器名称
-  const saved = findServer(config, address);
-  if (saved) {
-    address = saved.address;
-  }
+  const saved = await store.findServer(address);
+  if (saved) address = saved.address;
 
-  // 检查缓存
   let status = getCachedResult(address, config.cacheTTL);
-
   if (!status) {
     await ctx.reply(`正在查询 ${address}...`);
     status = await pingJava(address, { timeout: config.timeout });
     setCachedResult(address, status);
-    await addQueryRecord(ctx.store, address, status);
+    await addQueryRecord(store, address, status);
   }
 
-  // 格式化输出
   if (status.online) {
     const text = `🟢 ${status.address}\n👥 ${status.players.online}/${status.players.max} | ⏱ ${status.latency}ms`;
     await ctx.reply(text);
@@ -179,60 +113,48 @@ export async function handlePing(ctx: EventContext, config: PluginConfig, addres
   }
 }
 
-/**
- * 详细查询指令
- */
-export async function handleStatus(ctx: EventContext, config: PluginConfig, address: string): Promise<void> {
+export async function handleStatus(ctx: EventContext, config: PluginConfig, store: McStore, address: string): Promise<void> {
   if (!address) {
     await ctx.reply('请提供服务器地址\n用法: mc 状态 <地址[:端口]>');
     return;
   }
 
-  // 检查是否是已保存的服务器名称
-  const saved = findServer(config, address);
-  if (saved) {
-    address = saved.address;
-  }
+  const saved = await store.findServer(address);
+  if (saved) address = saved.address;
 
-  // 检查缓存
   let status = getCachedResult(address, config.cacheTTL);
-
   if (!status) {
     await ctx.reply(`正在查询 ${address}...`);
     status = await pingJava(address, { timeout: config.timeout });
     setCachedResult(address, status);
-    await addQueryRecord(ctx.store, address, status);
+    await addQueryRecord(store, address, status);
   }
 
-  // 格式化输出
   const text = formatStatusText(status);
   await ctx.reply(text);
 }
 
-/**
- * 列表指令
- */
-export async function handleList(ctx: EventContext, config: PluginConfig): Promise<void> {
-  if (config.servers.length === 0) {
+export async function handleList(ctx: EventContext, config: PluginConfig, store: McStore): Promise<void> {
+  const servers = await store.getServers();
+  if (servers.length === 0) {
     await ctx.reply('📋 服务器列表为空\n使用 mc 添加 <名称> <地址> 添加服务器');
     return;
   }
 
   if (config.imageMode && await isPuppeteerAvailable(config.puppeteerUrl)) {
-    const image = await renderListImage(config.servers, config.puppeteerUrl, config.customTemplates?.list);
+    const image = await renderListImage(servers, config.puppeteerUrl, config.customTemplates?.list);
     if (image) {
       await sendImage(ctx, image);
       return;
     }
   }
 
-  // 批量查询延迟
   const statuses = await Promise.allSettled(
-    config.servers.map(s => pingJava(s.address, { timeout: config.timeout }))
+    servers.map(s => pingJava(s.address, { timeout: config.timeout }))
   );
 
   const lines = ['📋 已保存的服务器:', ''];
-  config.servers.forEach((server, index) => {
+  servers.forEach((server, index) => {
     const result = statuses[index];
     let statusIcon = '⚫';
     let latencyStr = '';
@@ -245,20 +167,17 @@ export async function handleList(ctx: EventContext, config: PluginConfig): Promi
     lines.push(`${index + 1}. ${statusIcon} ${server.name} — ${server.address}${latencyStr}`);
   });
 
-  lines.push('', `共 ${config.servers.length} 个服务器`);
+  lines.push('', `共 ${servers.length} 个服务器`);
   await ctx.reply(lines.join('\n'));
 }
 
-/**
- * 添加指令
- */
-export async function handleAdd(ctx: EventContext, config: PluginConfig, name: string, address: string): Promise<void> {
+export async function handleAdd(ctx: EventContext, store: McStore, name: string, address: string): Promise<void> {
   if (!name || !address) {
     await ctx.reply('用法: mc 添加 <名称> <地址[:端口]>');
     return;
   }
 
-  const success = addServer(config, name, address);
+  const success = await store.addServer(name, address);
   if (success) {
     await ctx.reply(`✅ 已添加服务器: ${name} — ${address}`);
   } else {
@@ -266,16 +185,13 @@ export async function handleAdd(ctx: EventContext, config: PluginConfig, name: s
   }
 }
 
-/**
- * 删除指令
- */
-export async function handleDelete(ctx: EventContext, config: PluginConfig, nameOrAddress: string): Promise<void> {
+export async function handleDelete(ctx: EventContext, store: McStore, nameOrAddress: string): Promise<void> {
   if (!nameOrAddress) {
     await ctx.reply('用法: mc 删除 <名称或地址>');
     return;
   }
 
-  const success = removeServer(config, nameOrAddress);
+  const success = await store.removeServer(nameOrAddress);
   if (success) {
     await ctx.reply(`✅ 已删除服务器: ${nameOrAddress}`);
   } else {
@@ -283,16 +199,13 @@ export async function handleDelete(ctx: EventContext, config: PluginConfig, name
   }
 }
 
-/**
- * 编辑指令
- */
-export async function handleEdit(ctx: EventContext, config: PluginConfig, nameOrAddress: string, newName?: string, newAddress?: string): Promise<void> {
+export async function handleEdit(ctx: EventContext, store: McStore, nameOrAddress: string, newName?: string, newAddress?: string): Promise<void> {
   if (!nameOrAddress || (!newName && !newAddress)) {
     await ctx.reply('用法: mc 编辑 <名称> [新名称] [新地址]\n示例: mc 编辑 海岛 新名称 mc.new.net');
     return;
   }
 
-  const success = editServer(config, nameOrAddress, { name: newName, address: newAddress });
+  const success = await store.editServer(nameOrAddress, { name: newName, address: newAddress });
   if (success) {
     await ctx.reply(`✅ 已更新服务器: ${nameOrAddress}`);
   } else {
@@ -300,19 +213,17 @@ export async function handleEdit(ctx: EventContext, config: PluginConfig, nameOr
   }
 }
 
-/**
- * 批量查询所有服务器
- */
-export async function handleAll(ctx: EventContext, config: PluginConfig): Promise<void> {
-  if (config.servers.length === 0) {
+export async function handleAll(ctx: EventContext, config: PluginConfig, store: McStore): Promise<void> {
+  const servers = await store.getServers();
+  if (servers.length === 0) {
     await ctx.reply('📋 服务器列表为空\n使用 mc 添加 <名称> <地址> 添加服务器');
     return;
   }
 
-  await ctx.reply(`正在查询 ${config.servers.length} 个服务器...`);
+  await ctx.reply(`正在查询 ${servers.length} 个服务器...`);
 
   const results = await Promise.allSettled(
-    config.servers.map(async (server) => {
+    servers.map(async (server) => {
       const status = await pingJava(server.address, { timeout: config.timeout });
       return { server, status };
     })
@@ -332,22 +243,16 @@ export async function handleAll(ctx: EventContext, config: PluginConfig): Promis
   }
 
   const online = results.filter(r => r.status === 'fulfilled' && r.value.status.online).length;
-  lines.push('', `在线: ${online}/${config.servers.length}`);
+  lines.push('', `在线: ${online}/${servers.length}`);
   await ctx.reply(lines.join('\n'));
 }
 
-/**
- * 延迟图标：🟢 <100ms, 🟡 100-300ms, 🟠 >300ms
- */
 function latencyIcon(ms: number): string {
   if (ms < 100) return '🟢';
   if (ms < 300) return '🟡';
   return '🟠';
 }
 
-/**
- * 清除查询缓存
- */
 export function clearCache(): void {
   queryCache.clear();
 }

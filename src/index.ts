@@ -7,8 +7,9 @@ import {
 } from "@myfinal/plugin-runtime";
 
 import { PKG_VERSION } from "./version.js";
-import { loadConfig, saveConfig, editServer } from "./config.js";
+import { loadConfig, saveConfig } from "./config.js";
 import type { PluginConfig } from "./types.js";
+import { McStore } from "./store.js";
 import { pingJava } from "./mcping.js";
 import {
   handleHelp,
@@ -21,6 +22,7 @@ import {
   getQueryHistory,
   clearQueryHistory,
   addQueryRecord,
+  clearCache,
 } from "./commands.js";
 import { isPuppeteerAvailable, renderStatusImage, generatePreviewHtml } from "./render.js";
 
@@ -32,19 +34,24 @@ import { isPuppeteerAvailable, renderStatusImage, generatePreviewHtml } from "./
   icon: "🎮",
 })
 export default class McPlugin {
-  /** 插件加载时间 */
   private readonly startTime = Date.now();
-
-  /** 运行时配置 */
   private config: PluginConfig;
+  private store = new McStore();
+  private storeReady = false;
 
   constructor() {
     this.config = loadConfig();
   }
 
-  // ── 拦截器（日志） ─────────────────────────────────────────────────────
+  // ── 拦截器（日志 + 延迟初始化 store） ──────────────────────────────
   @Interceptor(10)
   async logInterceptor(ctx: EventContext): Promise<void> {
+    // PluginStore 仅在事件分发时可用，延迟初始化
+    if (!this.storeReady && ctx.store) {
+      await this.store.init(ctx.store);
+      this.storeReady = true;
+    }
+
     if (this.config.debug && ctx.event.type === "message") {
       console.log(
         `[mc-plugin] <${ctx.event.platform}> ${ctx.event.payload.senderName ?? "?"}: ${ctx.event.payload.text ?? ""}`
@@ -53,7 +60,7 @@ export default class McPlugin {
   }
 
   // ── 插件初始化 ───────────────────────────────────────────────────────
-  onSetup(ctx: PluginSetupContext): void {
+  async onSetup(ctx: PluginSetupContext): Promise<void> {
     // ── 注册指令元数据 ─────────────────────────────────────────────────
     ctx.command({
       name: "mc",
@@ -91,15 +98,13 @@ export default class McPlugin {
             if (match) {
               const address = match[1]?.trim();
               let targetAddress = address;
-              const saved = this.config.servers.find(
-                s => s.name === address || s.address === address
-              );
+              const saved = await this.store.findServer(address);
               if (saved) targetAddress = saved.address;
               const puppeteerAvailable = await isPuppeteerAvailable(this.config.puppeteerUrl);
               if (puppeteerAvailable) {
                 await c.reply(`正在查询 ${targetAddress}...`);
                 const status = await pingJava(targetAddress, { timeout: this.config.timeout });
-                await addQueryRecord(c.store, targetAddress, status);
+                await addQueryRecord(this.store, targetAddress, status);
                 const image = await renderStatusImage(status, this.config.puppeteerUrl, this.config.customTemplates?.status);
                 if (image) {
                   const groupId = c.event.payload.groupId;
@@ -117,7 +122,7 @@ export default class McPlugin {
                   return;
                 }
               }
-              await handleStatus(c, this.config, address);
+              await handleStatus(c, this.config, this.store, address);
             }
           },
         },
@@ -131,7 +136,7 @@ export default class McPlugin {
           examples: ["mc 列表"],
           order: 30,
           handler: async (c: EventContext) => {
-            await handleList(c, this.config);
+            await handleList(c, this.config, this.store);
           },
         },
         {
@@ -147,7 +152,7 @@ export default class McPlugin {
             const text = c.event.payload.text || "";
             const match = text.match(/mc\s+(?:添加|add|订阅)\s+(\S+)\s+(\S+)/i);
             if (match) {
-              await handleAdd(c, this.config, match[1], match[2]);
+              await handleAdd(c, this.store, match[1], match[2]);
             }
           },
         },
@@ -164,7 +169,7 @@ export default class McPlugin {
             const text = c.event.payload.text || "";
             const match = text.match(/mc\s+(?:删除|del|remove|取消)\s+(\S+)/i);
             if (match) {
-              await handleDelete(c, this.config, match[1]);
+              await handleDelete(c, this.store, match[1]);
             }
           },
         },
@@ -181,7 +186,7 @@ export default class McPlugin {
             const text = c.event.payload.text || "";
             const match = text.match(/mc\s+(?:编辑|edit|修改)\s+(\S+)(?:\s+(\S+))?(?:\s+(\S+))?/i);
             if (match) {
-              await handleEdit(c, this.config, match[1], match[2], match[3]);
+              await handleEdit(c, this.store, match[1], match[2], match[3]);
             }
           },
         },
@@ -195,7 +200,7 @@ export default class McPlugin {
           examples: ["mc 全部"],
           order: 70,
           handler: async (c: EventContext) => {
-            await handleAll(c, this.config);
+            await handleAll(c, this.config, this.store);
           },
         },
       ],
@@ -203,12 +208,10 @@ export default class McPlugin {
 
     // ── HTTP API 路由 ─────────────────────────────────────────────────
 
-    // GET /plugins/dian-plugin-mc/api/config
     ctx.route("GET", "/config", (_req, reply) => {
       reply.send({ ok: true, config: this.config });
     });
 
-    // POST /plugins/dian-plugin-mc/api/config
     ctx.route("POST", "/config", (req, reply) => {
       const body = req.body as Partial<PluginConfig>;
       if (body) {
@@ -218,52 +221,49 @@ export default class McPlugin {
       reply.send({ ok: true, config: this.config });
     });
 
-    // GET /plugins/dian-plugin-mc/api/ping?address=xxx
     ctx.route("GET", "/ping", async (req, reply) => {
-      const address = (req.query as any)?.address;
+      const address = (req.query as Record<string, string>)?.address;
       if (!address) {
         reply.status(400).send({ ok: false, error: "请提供 address 参数" });
         return;
       }
-
       const status = await pingJava(address, { timeout: this.config.timeout });
       reply.send({ ok: true, status });
     });
 
-    // GET /plugins/dian-plugin-mc/api/servers
-    ctx.route("GET", "/servers", (_req, reply) => {
-      reply.send({ ok: true, servers: this.config.servers });
+    ctx.route("GET", "/servers", async (_req, reply) => {
+      if (!this.storeReady) { reply.send({ ok: true, servers: [] }); return; }
+      const servers = await this.store.getServers();
+      reply.send({ ok: true, servers });
     });
 
-    // POST /plugins/dian-plugin-mc/api/servers/add
-    ctx.route("POST", "/servers/add", (req, reply) => {
-      const { name, address, type = 'java' } = req.body as any;
+    ctx.route("POST", "/servers/add", async (req, reply) => {
+      if (!this.storeReady) { reply.status(503).send({ ok: false, error: "数据库未就绪" }); return; }
+      const { name, address, type } = req.body as { name?: string; address?: string; type?: "java" | "bedrock" };
       if (!name || !address) {
         reply.status(400).send({ ok: false, error: "请提供 name 和 address" });
         return;
       }
-
-      const { addServer } = require("./config.js");
-      const success = addServer(this.config, name, address, type);
-      reply.send({ ok: success, servers: this.config.servers });
+      const success = await this.store.addServer(name, address, type);
+      const servers = await this.store.getServers();
+      reply.send({ ok: success, servers });
     });
 
-    // POST /plugins/dian-plugin-mc/api/servers/delete
-    ctx.route("POST", "/servers/delete", (req, reply) => {
-      const { nameOrAddress } = req.body as any;
+    ctx.route("POST", "/servers/delete", async (req, reply) => {
+      if (!this.storeReady) { reply.status(503).send({ ok: false, error: "数据库未就绪" }); return; }
+      const { nameOrAddress } = req.body as { nameOrAddress?: string };
       if (!nameOrAddress) {
         reply.status(400).send({ ok: false, error: "请提供 nameOrAddress" });
         return;
       }
-
-      const { removeServer } = require("./config.js");
-      const success = removeServer(this.config, nameOrAddress);
-      reply.send({ ok: success, servers: this.config.servers });
+      const success = await this.store.removeServer(nameOrAddress);
+      const servers = await this.store.getServers();
+      reply.send({ ok: success, servers });
     });
 
-    // POST /plugins/dian-plugin-mc/api/servers/update
-    ctx.route("POST", "/servers/update", (req, reply) => {
-      const { nameOrAddress, name, address } = req.body as any;
+    ctx.route("POST", "/servers/update", async (req, reply) => {
+      if (!this.storeReady) { reply.status(503).send({ ok: false, error: "数据库未就绪" }); return; }
+      const { nameOrAddress, name, address } = req.body as { nameOrAddress?: string; name?: string; address?: string };
       if (!nameOrAddress) {
         reply.status(400).send({ ok: false, error: "请提供 nameOrAddress" });
         return;
@@ -272,40 +272,28 @@ export default class McPlugin {
         reply.status(400).send({ ok: false, error: "请提供 name 或 address" });
         return;
       }
-
-      const success = editServer(this.config, nameOrAddress, { name, address });
-      reply.send({ ok: success, servers: this.config.servers });
+      const success = await this.store.editServer(nameOrAddress, { name, address });
+      const servers = await this.store.getServers();
+      reply.send({ ok: success, servers });
     });
 
-    // GET /plugins/dian-plugin-mc/api/history
-    ctx.route("GET", "/history", async (req, reply) => {
-      const store = (req as unknown as Record<string, unknown>).pluginStore as import("@myfinal/plugin-runtime").PluginStore | undefined;
-      if (!store) {
-        reply.send({ ok: true, history: [] });
-        return;
-      }
-      const history = await getQueryHistory(store);
+    ctx.route("GET", "/history", async (_req, reply) => {
+      if (!this.storeReady) { reply.send({ ok: true, history: [] }); return; }
+      const history = await getQueryHistory(this.store);
       reply.send({ ok: true, history });
     });
 
-    // DELETE /plugins/dian-plugin-mc/api/history
-    ctx.route("DELETE", "/history", async (req, reply) => {
-      const store = (req as unknown as Record<string, unknown>).pluginStore as import("@myfinal/plugin-runtime").PluginStore | undefined;
-      if (!store) {
-        reply.send({ ok: false, error: "PluginStore 未启用" });
-        return;
-      }
-      await clearQueryHistory(store);
+    ctx.route("DELETE", "/history", async (_req, reply) => {
+      if (!this.storeReady) { reply.status(503).send({ ok: false, error: "数据库未就绪" }); return; }
+      await clearQueryHistory(this.store);
       reply.send({ ok: true });
     });
 
-    // GET /plugins/dian-plugin-mc/api/puppeteer
     ctx.route("GET", "/puppeteer", async (_req, reply) => {
       const available = await isPuppeteerAvailable(this.config.puppeteerUrl);
       reply.send({ ok: true, available });
     });
 
-    // POST /plugins/dian-plugin-mc/api/preview-html
     ctx.route("POST", "/preview-html", (req, reply) => {
       const { type, html } = req.body as { type?: string; html?: string };
       if (!type || !html || !['status', 'help', 'list'].includes(type)) {
@@ -320,5 +308,11 @@ export default class McPlugin {
     ctx.ui({ staticDir: "./public", entry: "index.html" });
 
     console.log(`[mc-plugin] 插件已加载，版本 ${PKG_VERSION}`);
+  }
+
+  // ── 插件卸载 ───────────────────────────────────────────────────────
+  onStop(): void {
+    clearCache();
+    console.log("[mc-plugin] 插件已卸载");
   }
 }

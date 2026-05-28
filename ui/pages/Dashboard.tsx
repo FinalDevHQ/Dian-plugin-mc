@@ -26,7 +26,6 @@ interface ServerEntry {
 }
 
 interface PluginConfig {
-  servers: ServerEntry[]
   defaultPort: number
   timeout: number
   cacheTTL: number
@@ -34,19 +33,24 @@ interface PluginConfig {
 
 export default function Dashboard() {
   const [config, setConfig] = useState<PluginConfig | null>(null)
+  const [servers, setServers] = useState<ServerEntry[]>([])
   const [queryAddress, setQueryAddress] = useState("")
   const [querying, setQuerying] = useState(false)
   const [queryResult, setQueryResult] = useState<ServerStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const loadConfig = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
-      const r = await apiFetch(`${API}/config`).then(r => r.json())
-      if (r.ok) setConfig(r.config)
+      const [configR, serversR] = await Promise.all([
+        apiFetch(`${API}/config`).then(r => r.json()),
+        apiFetch(`${API}/servers`).then(r => r.json()),
+      ])
+      if (configR.ok) setConfig(configR.config)
+      if (serversR.ok) setServers(serversR.servers)
     } catch { /* ignore */ }
   }, [])
 
-  useEffect(() => { loadConfig() }, [loadConfig])
+  useEffect(() => { loadData() }, [loadData])
 
   const handleQuery = async () => {
     if (!queryAddress.trim()) return
@@ -68,7 +72,7 @@ export default function Dashboard() {
     }
   }
 
-  const onlineServers = config?.servers.filter(s => s.enabled).length ?? 0
+  const onlineServers = servers.filter(s => s.enabled).length
 
   return (
     <div className="flex flex-col gap-6">
@@ -87,7 +91,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
           label="已保存服务器"
-          value={config?.servers.length ?? "—"}
+          value={servers.length ?? "—"}
           icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>}
         />
         <StatCard
@@ -187,7 +191,7 @@ export default function Dashboard() {
       </Card>
 
       {/* 最近查询的服务器 */}
-      {config && config.servers.length > 0 && (
+      {servers.length > 0 && (
         <Card>
           <CardHeader>
             <Label>已保存的服务器</Label>
@@ -195,7 +199,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {config.servers.slice(0, 6).map((server, i) => (
+              {servers.slice(0, 6).map((server, i) => (
                 <button
                   key={i}
                   onClick={() => {
